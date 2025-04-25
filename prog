@@ -96,3 +96,57 @@ Wait_IO_End_2:
    print ""
  endif
   comprend tu ce code
+------------------------------------------------------------------------------------------------------------
+
+
+REM  ****************************************************************
+ B$ = "1,192.168.1.131"
+ WritAd = 242
+ Z$ = SFMT 1234,10,2 //Value1 = 1234
+ Z$ = Z$ + SFMT 456,10,2
+ Z$ = Z$ + SFMT 65535,10,2  
+ Z$ = Z$ + SFMT 65535,10,2  
+ Z$ = Z$ + SFMT 65535,10,2  
+ Z$ = Z$ + SFMT 65535,10,2//Value   
+
+WriteModbusRegister:
+ debug = 1
+ A$ = Chr$(16) + (Chr$(a%/256)+Chr$(a% MOD 256)) + (Chr$(0)+Chr$(a%/2)) + Chr$(a%) + Z$
+ a% = WritAd AND 65535
+ a% = LEN(Z$)
+ a% = Iosend "MODBUS",B$,A$
+
+ if (debug) then
+   for i%=1 to LEN(A$)
+     j%=ASCII(A$(i%))
+     X$ = SFMT j%,30,0,"%X"
+     print X$;" ";
+   next i%
+   print ""
+   print B$
+ endif
+ 
+Wait_IO_End_2:
+ b% = Iorcv a%,1
+ If b%=-1 Then
+   Goto Wait_IO_End_2
+ Endif
+ 
+ B$ = Iorcv a%
+
+ if (B$=A$(1 to 5)) then
+   print "Write OK"
+ else
+   print "Write Failed"
+ endif
+ 
+ if (debug) then
+   Print Len(B$);" bytes received"
+   for i%=1 to LEN(B$)
+     j%=ASCII(B$(i%))
+     X$ = SFMT j%,30,0,"%X"
+     print X$;" ";
+   next i%
+   print ""
+ endif
+ 
