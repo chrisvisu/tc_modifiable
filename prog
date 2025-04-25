@@ -1,0 +1,32 @@
+Rem --- eWON start section: Init Section
+eWON_init_section:
+Rem --- eWON user (start)
+TestIO:
+  REM === Lecture de 60 registres à partir de 40240 (adresse = 239)
+  A$ = CHR$(3) + CHR$(0) + CHR$(239) + CHR$(0) + CHR$(100)  REM Fonction 3, Addr 239, quantité 60
+  a% = IOSEND "MODBUS", "1,192.168.1.131", A$
+
+Wait_IO_End:
+  b% = IORCV a%, 1
+  IF b% = -1 THEN GOTO Wait_IO_End
+
+  B$ = IORCV a%
+
+  PRINT "Réponse brute ("; LEN(B$); " octets):"
+  FOR i% = 1 TO LEN(B$)
+    PRINT STR$(ASCII(B$(i%))); " ";
+  NEXT i%
+  PRINT ""
+
+  REM Analyse des 60 registres (2 octets par registre)
+  IF LEN(B$) >= 3 + 2 * 100 THEN
+    PRINT "Valeurs converties (de registre 40240 à 40299):"
+    FOR i% = 0 TO 99
+      hi% = ASCII(MID$(B$, 4 + i% * 2, 1))  REM Octet haut
+      lo% = ASCII(MID$(B$, 5 + i% * 2, 1))  REM Octet bas
+      val% = hi% * 256 + lo%               REM Combine les octets
+      PRINT "Registre "; 40240 + i%; " = "; val%
+    NEXT i%
+
+  ENDIF
+END
