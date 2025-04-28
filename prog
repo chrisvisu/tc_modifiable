@@ -33,6 +33,39 @@ END
 
 ------------------------------------------------------------------------------------------------------------
 
+valeur= Activation@
+SendIO:
+  REM Send Modbus request to write to multiple registers
+  REM Writes 4321 and 4322 to first 2 registers
+  A$ = Chr$(16)+Chr$(0)+Chr$(240)+Chr$(0)+Chr$(2)+Chr$(4)+Chr$(16)
+  A$ = A$ + Chr$(16) + Chr$(valeur) + Chr$(16) + Chr$(valeur)
+  a% = Iosend "MODBUS","1,192.168.1.131",A$
+Wait_IO_End:
+  b% = Iorcv a%,1
+  If b% = -1 Then Goto Wait_IO_End
+  B$ = Iorcv a%
+  Print "Réponse length :"; Len(B$)
+  For i%=1 To Len(B$)
+  Print ASCII(B$(i%)); " ";
+Next i%
+End
+------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 REM  ****************************************************************
 REM  WriteModbusRegister     --> Modbus function 16
