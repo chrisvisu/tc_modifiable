@@ -185,6 +185,27 @@ Wait_IO_End_2:
  
 ---------------------------------------------------------------------
 
+
+WRITE:
+  // Change I_Tri_y et I_Moy_Max_y
+  @WriteRegister($DB_Write_enable, $CS1_ACTIF)
+  PRINT "Erreur d'envoi"
+END
+
+FUNCTION WriteRegister($regAddr, $value)
+  A$ = CHRS(6) + CHRS(INT($regAddr / 256)) + CHRS($regAddr MOD 256) + CHRS(INT($value / 256)) + CHRS($value MOD 256)
+  A% = IOSEND "MODBUS", "1,192.168.1.131", A$
+  IF A% < 0 THEN
+    PRINT "Erreur d'envoi"
+  ENDIF
+END
+Rem --- eWON user (end)
+End
+Rem --- eWON end section: Init Section
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
 MAX du MAX
 
 Rem --- eWON start section: Init Section
