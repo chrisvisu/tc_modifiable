@@ -183,3 +183,391 @@ Wait_IO_End_2:
    print ""
  endif
  
+---------------------------------------------------------------------
+
+MAX du MAX
+
+Rem --- eWON start section: Init Section
+eWON_init_section:
+Rem --- eWON user (start)
+IF Nom_Projet@ = "" Then  Nom_Projet@="default" ENDIF
+IF RECORD_TIMER@ = 0 THEN RECORD_TIMER@ = 60 ENDIF  //  1 minute par défaut
+IF RECORD_I_MAX@ = 0 THEN RECORD_I_MAX@ = 1 ENDIF  // 1 seconde par défaut
+address_mail$ = "maintenance@visu-energy.com"
+num_tel$ = "0033660619576@sms.talk2m.com,0033660154102@sms.talk2m.com"
+
+$I_Moy_Max = 0
+lastMax1        = 0     
+lastMax1_round  = 0    
+    
+// Init TIMER entre 1 et plusieurs mn , TIMER 2 entre 1 et plusieurs secondes
+	TSET 1, RECORD_TIMER@ //Timer d'enregistrement 
+	TSET 2, RECORD_I_MAX@   //Timer MAJ et imax
+  TSET 3, RECORD_I_MAX@  //Timer MAJ et index
+  
+// MAJ des I_Moy_Max toutes les secondes
+	ONTIMER 2, "GOTO MAJ_I_Moy_Max"
+// MAJ toute les minutes du I_Moy_Max_Max et RAZ du I_Moy_Max 
+	ONTIMER 1,  "GOTO MAJ_I_Moy_Max_Max"
+  // MAJ toute les minutes des index
+  ONTIMER 3,  " GOTO MAJ_Consommation_Energie"
+    
+// Sauvegarde toute les heures du fichier CSV dans le FTP et export
+	ONDATE 1, "0 * * * *","GOTO MyFTP"
+// Envoi d'un recapitulatif d'etat de la valise par mail tous les jours a 8h
+	ONDATE 2, "0 8 * * *", "GOTO Envoi_Recap"
+  
+// Modification sur changements
+ONCHANGE "NOM_PROJET"      ,"GOTO Change_Nom_Projet"
+ONCHANGE "SAUV_CONFIG"     ,"GOTO Sauv_Config"
+ONCHANGE "RAZ_Moy_Max_Max" ,"GOTO RAZ_Moy_Max_Max"
+ONCHANGE "MAJ_PARAM"       ,"GOTO MAJ_Param"
+ONCHANGE "ENVOI_ACTIF"     ,"GOTO Envoi_Actif"
+ONCHANGE "RECORD_TIMER"    ,"GOTO Update_record_timer"
+// ONCHANGE "RECORD_I_MAX"    ,"GOTO Record_i_max"
+// Declacement alarme pour envoi sms
+ONALARM "Status"         ,"@EnvoiSMS(NOM_VALISE@ + ' : PB COM ULYS')"
+ONALARM "TEMP_VALISE",    "@EnvoiSMS(NOM_VALISE@ + ' : TEMPERATURE VALISE TROP ELEVEE : ' + STR$(TEMP_VALISE@))"
+// INIT
+// Parametrage variable nom de la valise
+	SETSYS SYS,"load"
+	Nom_Valise@ = GETSYS SYS,"Identification"
+// Init adresse IP
+	SETSYS COM, "load"
+	EthIp$ = GETSYS COM, "EthIp"
+@INIT_DIRECTORY("/usr/data/")        // INIT repertoire data
+@INIT_DIRECTORY("/usr/data/VISU/")   // INIT repertoire groupe A - Creation si absent
+@INIT_DIRECTORY("/usr/data/ALARM/")  // INIT repertoire groupe B - Creation si absent
+@INIT_PROJECT_DIR(Nom_Projet@)       // INIT sous repertoire du projet - Creation repertoire si absent
+SENDMAIL address_mail$, "", "Demarrage de la valise", "Demarrage de la valise " + NOM_VALISE@ + " au site " + NOM_PROJET@ + " dans le " + NOM_EQUIPEMENT@
+// INIT matrice pour le nom Ix_y, neuf lignes (x), trois colonnes (y).
+// [[.  .  .]
+//  [.  .  .]
+//  [.  .  .]
+//  [.  .  .]
+//      .
+//      .
+//     etc
+	DIM TC$(9, 3, 4)
+	FOR y% = 1 TO 9
+		FOR x% = 1 TO 3
+			TC$(y%, x%) = "I" + STR$(x%) + "_" + STR$(y%)
+		NEXT x%
+	NEXT y%
+// INIT Seuils
+  FOR y% = 1 TO 9
+    IF GETIO ("VAL_LOW_TC" + STR$(y%)) = 0 THEN SETIO "VAL_LOW_TC" + STR$(y%), -1
+    IF GETIO ("VAL_HIGH_TC" + STR$(y%)) = 0 THEN SETIO "VAL_HIGH_TC" + STR$(y%), 2500
+  NEXT y%
+  
+// INIT concat adresse et numero
+  IF Adresse_Mail_1@ <> "" THEN address_mail$ = address_mail$ + "," + Adresse_Mail_1@
+  IF Adresse_Mail_2@ <> "" THEN address_mail$ = address_mail$ + "," + Adresse_Mail_2@
+  IF Adresse_Mail_3@ <> "" THEN address_mail$ = address_mail$ + "," + Adresse_Mail_3@
+  
+  @Modif_TEL(Tel_1@)
+  @Modif_TEL(Tel_2@)
+  @Modif_TEL(Tel_3@)
+END
+Change_Nom_Projet:
+	// INIT nom projet - Creation repertoire si absent
+	IF Nom_Projet@ = "" Then  Nom_Projet@="default" ENDIF
+	A% = FS "isDir", "/usr/data/VISU/"  + Nom_Projet@ + "/"
+	IF A% = -1 Then FS "mkdir","/usr/data/VISU/"  + Nom_Projet@ + "/"  ENDIF
+	A% = FS "isDir", "/usr/data/ALARM/" + Nom_Projet@ + "/"
+	IF A% = -1 Then FS "mkdir","/usr/data/ALARM/" + Nom_Projet@ + "/"  ENDIF
+END
+//
+MyFTP:
+	T$=Time$
+	A$="/usr/data/VISU/"+Nom_Projet@+"/data_"+Nom_Projet@+"_"+Nom_Equipement@+"_"+T$(7 To 10)+T$(4 To 5)+T$(1 To 2)+"_"+T$(12 To 13)+T$(15 To 16)+T$(18 To 19)+".csv"
+	B$ = "[$dtHT $ftT $st_h1 $et_0 $flA]"
+	C$ = "ftp:ftp@" + EthIp$
+	PUTFTP A$,B$,C$
+	
+	A$="/usr/data/ALARM/"+Nom_Projet@+"/data_"+Nom_Projet@+"_"+Nom_Equipement@+"_"+T$(7 To 10)+T$(4 To 5)+T$(1 To 2)+"_"+T$(12 To 13)+T$(15 To 16)+T$(18 To 19)+".csv"
+	B$ = "[$dtAH $ftT $st_h1 $et_0 $flB]"
+	PUTFTP A$,B$,C$
+	
+	// EXPORT DANS UN SERVEUR FTP OPTIONNEL
+	T$=Time$
+	A$="/"+Nom_Valise@+"/data_"+Nom_Projet@+"_"+Nom_Equipement@+"_"+T$(7 To 10)+T$(4 To 5)+T$(1 To 2)+"_"+T$(12 To 13)+T$(15 To 16)+T$(18 To 19)+".csv"
+	B$ = "[$dtHT $ftT $stL $et_0 $ut]"
+	PUTFTP A$,B$
+END
+//
+Sauv_Config:
+	T$=Time$
+	A$ = "/data" + "/Config_"+ Nom_Projet@ + "_" + Nom_Equipement@ + "_" + T$(7 To 10)+T$(4 To 5)+T$(1 To 2)+"_"+T$(12 To 13)+T$(15 To 16)+ ".csv"
+	OPEN A$ FOR TEXT OUTPUT AS 1
+		// Ecriture nom des colonnes
+		PUT 1, "Nom Valise";"Projet";"Nom Equipement";"TIME RECORD";"TIME MAX RECORD";
+		PUT 1, "Voie-1";"Voie-2";"Voie-3";"Voie-4";"Voie-5";"Voie-6";"Voie-7";"Voie-8";"Voie-9";
+		PUT 1, "Val_TC1";"Val_TC2";"Val_TC3";"Val_TC4";"Val_TC5";"Val_TC6";"Val_TC7";"Val_TC8";"Val_TC9"
+		// Ecriture valeur
+		PUT 1, NOM_VALISE@;NOM_PROJET@;Nom_Equipement@;RECORD_TIMER@;RECORD_I_MAX@;
+		PUT 1, "_"+Nom_TC1@;"_"+Nom_TC2@;"_"+Nom_TC3@;"_"+Nom_TC4@;"_"+Nom_TC5@;"_"+Nom_TC6@;"_"+Nom_TC7@;"_"+Nom_TC8@;"_"+Nom_TC9@;
+		PUT 1, Val_TC1@;Val_TC2@;Val_TC3@;Val_TC4@;Val_TC5@;Val_TC6@;Val_TC7@;Val_TC8@;Val_TC9@
+	CLOSE 1
+END
+//
+Envoi_Actif:
+	IF TC1_ACTIF@ = 1 THEN val_mail% = 58
+	ELSE
+		val_mail% = 0
+	ENDIF
+	// Envoi Mail
+	@SetTagEnvoi("Status",         val_mail%, address_mail$)
+	@SetTagEnvoi("TEMP_VALISE",    val_mail%, address_mail$)
+	
+	FOR i% = 1 TO 9
+		FOR j% = 1 TO 3
+			@SetTagEnvoi(TC$(i%, j%), val_mail%, address_mail$)
+		NEXT j%
+	NEXT i%
+END
+//
+Update_record_timer:
+    @SetTagTimerRecord("hz", RECORD_TIMER@)
+    @SetTagTimerRecord("V1", RECORD_TIMER@)
+    @SetTagTimerRecord("V2", RECORD_TIMER@)
+    @SetTagTimerRecord("V3", RECORD_TIMER@)
+      
+    FOR i% = 1 TO 9
+		  str_num$ = STR$(i%)
+      //ENREGISTREMENT DES VALEURS DU COURANT
+      @SetTagTimerRecord("I1_"+str_num$, RECORD_TIMER@)
+      @SetTagTimerRecord("I2_"+str_num$, RECORD_TIMER@)
+		  @SetTagTimerRecord("I3_"+str_num$, RECORD_TIMER@)
+      
+      //ENREGISTREMENT DES ENERGIES
+      @SetTagTimerRecord("SUM_EA_"+str_num$, RECORD_TIMER@)
+      @SetTagTimerRecord("SUM_ER_"+str_num$, RECORD_TIMER@)
+		  @SetTagTimerRecord("SUM_ES_"+str_num$, RECORD_TIMER@)
+      
+      @SetTagTimerRecord("P1_"+str_num$, RECORD_TIMER@)
+      @SetTagTimerRecord("P2_"+str_num$, RECORD_TIMER@)
+		  @SetTagTimerRecord("P3_"+str_num$, RECORD_TIMER@)
+      
+      @SetTagTimerRecord("Q1_"+str_num$, RECORD_TIMER@)
+      @SetTagTimerRecord("Q2_"+str_num$, RECORD_TIMER@)
+		  @SetTagTimerRecord("Q3_"+str_num$, RECORD_TIMER@)
+      
+      //ENREGISTREMENT DES TAUX DE DISTORSIONS HARMONIQUES
+      @SetTagTimerRecord("THD_"+str_num$, RECORD_TIMER@)
+      
+      //ENREGISTREMENT DES FACTEURS DE PUISSANCES
+      @SetTagTimerRecord("PF_"+str_num$, RECORD_TIMER@)
+    NEXT i%
+    
+    
+END
+//
+Envoi_Recap:
+	IF Recap_ACTIF@ = 1 THEN
+		saut_ligne$ = "" + CHR$(13) + CHR$(10)
+		subject$ = "Recapitulatif de la valise"
+		content$ = "Toutes ces informations, et bien plus encore, peuvent etre retrouvees sur Talk2m (https://m2web.talk2m.com/VISU-ENERGY)" + saut_ligne$
+		content$ = content$ + "Projet : " + Nom_Projet@ + ", Nom d'equipement : " + Nom_Equipement@ + saut_ligne$ + saut_ligne$
+		FOR i% = 1 TO 9
+			str_num_tc$ = STR$(i%)
+			content$ = content$ + "  Depart " + str_num_tc$ + " :" + saut_ligne$
+			content$ = content$ + "    Nom : " + GETIO ("Nom_TC" + str_num_tc$) + ", Valeur de disjoncteur : " + STR$(GETIO ("VAL_TC" + str_num_tc$)) + " (A)" + saut_ligne$
+			content$ = content$ + "    Seuil bas : " + STR$(GETIO ("VAL_LOW_TC" + str_num_tc$)) + " (A)" + ", Seuil haut : " + STR$(GETIO ("VAL_HIGH_TC" + str_num_tc$)) + " (A)" + saut_ligne$
+			content$ = content$ + "    Max Courant : " + STR$(GETIO ("I_Moy_Max_Max_" + str_num_tc$)) + " (A)" + saut_ligne$
+			content$ = content$ + saut_ligne$
+		NEXT i%
+		
+		SENDMAIL address_mail$, "", subject$, content$
+	ENDIF
+END
+MAJ_I_Moy_Max:
+  @Update_I_Moy_Max(TC1_ACTIF@, I_Moy_Tri_1@, I1_1@, I2_1@, I3_1@, I_Moy_Max_1@)
+
+ newMax = I_Moy_Max_1@
+  new2d  = INT(newMax*100 + 0.5) / 100    
+
+  IF new2d > lastMax1_round THEN
+    heure$          = TIME$
+    SETIO "Date", heure$                 
+    lastMax1        = newMax
+    lastMax1_round  = new2d
+    PRINT "pic="; STR$(new2d); " A  heure:"; heure$
+  ENDIF
+  str_num$  = "1"
+  i_moy_tri = GETIO("I_Moy_Tri_" + str_num$)
+  IF i_moy_tri <> 0 THEN
+    I1 = ABS(GETIO("I1_" + str_num$) - i_moy_tri)
+    I2 = ABS(GETIO("I2_" + str_num$) - i_moy_tri)
+    I3 = ABS(GETIO("I3_" + str_num$) - i_moy_tri)
+    SETIO("I_Desequilibre_" + str_num$), (I1 + I2 + I3) / (i_moy_tri * 3) * 100
+  ELSE
+    SETIO("I_Desequilibre_" + str_num$), 0
+  ENDIF
+END
+// MAJ parametres TAG
+MAJ_Param:
+	// Change TCy
+	@update_tc_tag(1, TC1_ACTIF@, VAL_HIGH_TC1@, VAL_LOW_TC1@)
+	@update_tc_tag(2, TC2_ACTIF@, VAL_HIGH_TC2@, VAL_LOW_TC2@)
+	@update_tc_tag(3, TC3_ACTIF@, VAL_HIGH_TC3@, VAL_LOW_TC3@)
+	@update_tc_tag(4, TC4_ACTIF@, VAL_HIGH_TC4@, VAL_LOW_TC4@)
+	@update_tc_tag(5, TC5_ACTIF@, VAL_HIGH_TC5@, VAL_LOW_TC5@)
+	@update_tc_tag(6, TC6_ACTIF@, VAL_HIGH_TC6@, VAL_LOW_TC6@)
+	@update_tc_tag(7, TC7_ACTIF@, VAL_HIGH_TC7@, VAL_LOW_TC7@)
+	@update_tc_tag(8, TC8_ACTIF@, VAL_HIGH_TC8@, VAL_LOW_TC8@)
+	@update_tc_tag(9, TC9_ACTIF@, VAL_HIGH_TC9@, VAL_LOW_TC9@)
+	
+	address_mail$ = "maintenance@visu-energy.com"
+	IF Adresse_Mail_1@ <> "" THEN address_mail$ = address_mail$ + "," + Adresse_Mail_1@
+	IF Adresse_Mail_2@ <> "" THEN address_mail$ = address_mail$ + "," + Adresse_Mail_2@
+	IF Adresse_Mail_3@ <> "" THEN address_mail$ = address_mail$ + "," + Adresse_Mail_3@
+	num_tel$ = "0033660619576@sms.talk2m.com,0033660154102@sms.talk2m.com"
+	@Modif_TEL(Tel_1@)
+	@Modif_TEL(Tel_2@)
+	@Modif_TEL(Tel_3@)
+	
+	GOTO Envoi_Actif
+END
+//Calcul le max de I_Moy_Max
+MAJ_I_Moy_Max_Max:
+	//Calcul des I_Moy_Max_Max et RAZ du I_Moy_Max pour TCy
+	@update_I_Moy_Max_Max(TC1_ACTIF@, I_Moy_Max_1@, I_Moy_Max_Max_1@, VAL_TC1@, I_Moy_Ratio_1@, I_Desequilibre_1@, I_Desequilibre_Max_1@)
+	@update_I_Moy_Max_Max(TC2_ACTIF@, I_Moy_Max_2@, I_Moy_Max_Max_2@, VAL_TC2@, I_Moy_Ratio_2@, I_Desequilibre_2@, I_Desequilibre_Max_2@)
+	@update_I_Moy_Max_Max(TC3_ACTIF@, I_Moy_Max_3@, I_Moy_Max_Max_3@, VAL_TC3@, I_Moy_Ratio_3@, I_Desequilibre_3@, I_Desequilibre_Max_3@)
+	@update_I_Moy_Max_Max(TC4_ACTIF@, I_Moy_Max_4@, I_Moy_Max_Max_4@, VAL_TC4@, I_Moy_Ratio_4@, I_Desequilibre_4@, I_Desequilibre_Max_4@)
+	@update_I_Moy_Max_Max(TC5_ACTIF@, I_Moy_Max_5@, I_Moy_Max_Max_5@, VAL_TC5@, I_Moy_Ratio_5@, I_Desequilibre_5@, I_Desequilibre_Max_5@)
+	@update_I_Moy_Max_Max(TC6_ACTIF@, I_Moy_Max_6@, I_Moy_Max_Max_6@, VAL_TC6@, I_Moy_Ratio_6@, I_Desequilibre_6@, I_Desequilibre_Max_6@)
+	@update_I_Moy_Max_Max(TC7_ACTIF@, I_Moy_Max_7@, I_Moy_Max_Max_7@, VAL_TC7@, I_Moy_Ratio_7@, I_Desequilibre_7@, I_Desequilibre_Max_7@)
+	@update_I_Moy_Max_Max(TC8_ACTIF@, I_Moy_Max_8@, I_Moy_Max_Max_8@, VAL_TC8@, I_Moy_Ratio_8@, I_Desequilibre_8@, I_Desequilibre_Max_8@)
+	@update_I_Moy_Max_Max(TC9_ACTIF@, I_Moy_Max_9@, I_Moy_Max_Max_9@, VAL_TC9@, I_Moy_Ratio_9@, I_Desequilibre_9@, I_Desequilibre_Max_9@)
+END
+// Mise à jour des consommations énergétiques
+MAJ_Consommation_Energie:
+    @update_Consommation_Energie(SUM_EA_1@, SUM_ER_1@, Index_deb_EA_1@, Index_deb_ER_1@, "1")
+    @update_Consommation_Energie(SUM_EA_2@, SUM_ER_2@, Index_deb_EA_2@, Index_deb_ER_2@, "2")
+    @update_Consommation_Energie(SUM_EA_3@, SUM_ER_3@, Index_deb_EA_3@, Index_deb_ER_3@, "3")
+    @update_Consommation_Energie(SUM_EA_4@, SUM_ER_4@, Index_deb_EA_4@, Index_deb_ER_4@, "4")
+    @update_Consommation_Energie(SUM_EA_5@, SUM_ER_5@, Index_deb_EA_5@, Index_deb_ER_5@, "5")
+    @update_Consommation_Energie(SUM_EA_6@, SUM_ER_6@, Index_deb_EA_6@, Index_deb_ER_6@, "6")
+    @update_Consommation_Energie(SUM_EA_7@, SUM_ER_7@, Index_deb_EA_7@, Index_deb_ER_7@, "7")
+    @update_Consommation_Energie(SUM_EA_8@, SUM_ER_8@, Index_deb_EA_8@, Index_deb_ER_8@, "8")
+    @update_Consommation_Energie(SUM_EA_9@, SUM_ER_9@, Index_deb_EA_9@, Index_deb_ER_9@, "9")
+END
+// Mise à jour des consommations énergétiques
+// MAJ parametres TAG
+// RAZ de Moy_Max_Max et des index
+RAZ_Moy_Max_Max:
+	FOR y% = 1 TO 9
+			SETIO "I_Moy_Max_Max_" + STR$(y%), 0
+	NEXT y%
+     GOTO RAZ_Index  
+END
+RAZ_Index:
+    FOR i% = 1 TO 9
+        SETIO "SUM_EA_" + STR$(i%), 0
+        SETIO "SUM_ER_" + STR$(i%), 0
+        SETIO "Index_deb_EA_" + STR$(i%), GETIO("Index_EA_" + STR$(i%))
+        SETIO "Index_deb_ER_" + STR$(i%), GETIO("Index_ER_" + STR$(i%))
+    NEXT i%
+END
+
+
+//
+FUNCTION INIT_DIRECTORY($dir$)
+    $A% = FS "isDir", $dir$
+    IF $A% = -1 THEN FS "mkdir", $dir$ ENDIF
+ENDFN
+//
+FUNCTION INIT_PROJECT_DIR($proj$)
+    IF $proj$ = "" THEN $proj$ = "default" ENDIF
+    @INIT_DIRECTORY("/usr/data/VISU/"  + $proj$ + "/")
+    @INIT_DIRECTORY("/usr/data/ALARM/" + $proj$ + "/")
+ENDFN
+//
+FUNCTION Update_I_Moy_Max($actif%, @$I_Moy_Tri, $I1, $I2, $I3, @$I_Moy_Max)
+  IF $actif% = 1 THEN
+    $I_Moy_Tri = ($I1 + $I2 + $I3) / 3      
+    IF $I_Moy_Max < $I_Moy_Tri THEN          
+      $I_Moy_Max = $I_Moy_Tri
+    ENDIF
+  ENDIF
+ENDFN
+
+//
+FUNCTION update_tc_tag($tc%, $actif%, $val_high, $val_low)
+	// Change TCy
+	IF $actif% = 0 THEN
+		FOR $i% = 1 TO 3
+			@SetTagHighLowAl(TC$($tc%, $i%), 0, 2500, -1)
+		NEXT $i%
+	ELSE 
+		FOR $i% = 1 TO 3
+			@SetTagHighLowAl(TC$($tc%, $i%), 1, $val_high, $val_low)
+		NEXT $i%
+	ENDIF
+ENDFN
+//
+FUNCTION update_I_Moy_Max_Max($actif%, @$I_Moy_Max, @$I_Moy_Max_Max, $val_tc, @$I_Moy_Ratio, $Desequilibre, @$Desequilibre_Max)
+	IF $actif% = 1 THEN
+	  // MAJ I_MAX_MAx
+	  IF $I_Moy_Max > $I_Moy_Max_Max THEN $I_Moy_Max_Max = $I_Moy_Max ENDIF
+	  // RAZ Moy_Max
+	  $I_Moy_Max = 0
+	  // Calcul ratio
+		IF $val_tc <> 0 THEN
+		  $I_Moy_Ratio = ($I_Moy_Max_Max / $val_tc) * 100
+		ELSE
+		  $I_Moy_Ratio = 0
+		ENDIF
+		
+	IF $Desequilibre > $Desequilibre_Max THEN $Desequilibre_Max = $Desequilibre ENDIF
+	ENDIF
+ENDFN
+// Fonction de mise à jour de la consommation énergétique
+FUNCTION update_Consommation_Energie(@$SUM_EA, @$SUM_ER, @$Index_deb_EA, @$Index_deb_ER, $index_num$)
+    // Récupération des valeurs mesurées
+    $Index_EA = GETIO("Index_EA_" + $index_num$)
+    $Index_ER = GETIO("Index_ER_" + $index_num$)
+    // Mise à jour continue des consommations
+    $SUM_EA = $Index_EA - $Index_deb_EA
+    $SUM_ER = $Index_ER - $Index_deb_ER
+ENDFN
+//
+FUNCTION SetTagHighLowAl($nom_tag$, $AlEnabled%, $AlHigh, $AlLow)
+	SETSYS TAG, "LOAD",      $nom_tag$
+	SETSYS TAG, "AlEnabled", $AlEnabled%
+	SETSYS TAG, "AlHigh",    $AlHigh
+	SETSYS TAG, "AlLow",     $AlLow
+	SETSYS TAG, "SAVE"
+ENDFN
+//
+FUNCTION SetTagAlarm($nom_tag$, $AlEnabled%)
+	SETSYS TAG, "LOAD",      $nom_tag$
+	SETSYS TAG, "AlEnabled", $AlEnabled%
+	SETSYS TAG, "SAVE"
+ENDFN
+//
+FUNCTION SetTagEnvoi($nom_tag$, $val_mail%, $address_mail$)
+	SETSYS TAG, "LOAD", $nom_tag$
+	SETSYS TAG, "EEN",  $val_mail%
+	SETSYS TAG, "ETO",  $address_mail$
+	SETSYS TAG, "SAVE"
+ENDFN
+//
+FUNCTION EnvoiSMS($message$)
+	IF ENVOI_ACTIF@ = 1 THEN SENDMAIL num_tel$, "", $message$, ""
+ENDFN 
+//
+FUNCTION Modif_TEL($nom_tag$)
+	IF $nom_tag$ <> "" THEN 
+		$tmp$ = $nom_tag$
+		num_tel$ = num_tel$ + ",0033" + $tmp$(2 TO 10) + "@sms.talk2m.com"
+	ENDIF
+ENDFN
+//
+FUNCTION SetTagTimerRecord($nom_tag$, $LogTimer) 
+	SETSYS TAG, "LOAD",      $nom_tag$
+	SETSYS TAG, "LogTimer",  $LogTimer
+	SETSYS TAG, "SAVE"
+ENDFN-
