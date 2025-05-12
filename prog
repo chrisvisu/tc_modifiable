@@ -592,3 +592,26 @@ FUNCTION SetTagTimerRecord($nom_tag$, $LogTimer)
 	SETSYS TAG, "LogTimer",  $LogTimer
 	SETSYS TAG, "SAVE"
 ENDFN-
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   ELSE
+     SETIO "Date_1",Om$
+   PRINT "pic="; STR$(new2d); " A  heure:"; Om$
+  ENDIF
+  
